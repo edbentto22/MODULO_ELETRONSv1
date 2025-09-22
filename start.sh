@@ -83,7 +83,8 @@ http {
     gzip on;
     gzip_vary on;
     gzip_min_length 10240;
-    gzip_proxied expired no-cache no-store private must-revalidate max-age=0;
+    # Removidos must-revalidate e max-age=0 (inválidos) e adicionado 'auth' conforme docs
+    gzip_proxied expired no-cache no-store private auth;
     gzip_types
         text/plain
         text/css
