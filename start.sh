@@ -206,9 +206,9 @@ log "Nginx started successfully (PID: $NGINX_PID)"
 # Iniciar FastAPI
 log "Starting FastAPI application..."
 if [ "$ENVIRONMENT" = "development" ]; then
-    uvicorn app:app --host 127.0.0.1 --port 8002 --reload --log-level debug &
+    uvicorn app:app --host 127.0.0.1 --port 8002 --reload --log-level debug --root-path /api &
 else
-    uvicorn app:app --host 127.0.0.1 --port 8002 --workers 2 --log-level info &
+    uvicorn app:app --host 127.0.0.1 --port 8002 --workers 2 --log-level info --root-path /api &
 fi
 
 UVICORN_PID=$!
