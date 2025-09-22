@@ -57,7 +57,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 # Usar usuário não-root para executar a aplicação
 # (nginx precisará rodar como root internamente para bind na porta 80)
-USER appuser
+# USER appuser
 
 # Comando de inicialização
 CMD ["/app/start.sh"]
