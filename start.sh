@@ -71,6 +71,11 @@ http {
     access_log /var/log/nginx/access.log main;
     error_log /var/log/nginx/error.log warn;
 
+    # Preferir cabeçalhos X-Forwarded-* vindos do proxy externo (Traefik) quando existirem
+    map $http_x_forwarded_proto $proxy_x_forwarded_proto { default $scheme; ~. $http_x_forwarded_proto; }
+    map $http_x_forwarded_host  $proxy_x_forwarded_host  { default $host;   ~. $http_x_forwarded_host; }
+    map $http_x_forwarded_port  $proxy_x_forwarded_port  { default $server_port; ~. $http_x_forwarded_port; }
+
     # Performance
     sendfile on;
     tcp_nopush on;
@@ -129,9 +134,9 @@ http {
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Port $server_port;
+            proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
+            proxy_set_header X-Forwarded-Host $proxy_x_forwarded_host;
+            proxy_set_header X-Forwarded-Port $proxy_x_forwarded_port;
             
             # Timeouts
             proxy_connect_timeout 5s;
@@ -147,9 +152,9 @@ http {
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Port $server_port;
+            proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
+            proxy_set_header X-Forwarded-Host $proxy_x_forwarded_host;
+            proxy_set_header X-Forwarded-Port $proxy_x_forwarded_port;
             
             # Timeout mais longo para uploads
             proxy_connect_timeout 5s;
@@ -163,6 +168,9 @@ http {
         location /imagens/ {
             proxy_pass http://127.0.0.1:8002/imagens/;
             proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
+            proxy_set_header X-Forwarded-Host $proxy_x_forwarded_host;
+            proxy_set_header X-Forwarded-Port $proxy_x_forwarded_port;
             
             # Cache headers para imagens
             expires 1d;
@@ -173,6 +181,9 @@ http {
         location /health {
             access_log off;
             proxy_pass http://127.0.0.1:8002/health;
+            proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
+            proxy_set_header X-Forwarded-Host $proxy_x_forwarded_host;
+            proxy_set_header X-Forwarded-Port $proxy_x_forwarded_port;
         }
     }
 }
