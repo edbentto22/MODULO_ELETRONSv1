@@ -100,8 +100,8 @@ http {
         application/javascript
         application/json;
 
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=upload:10m rate=10r/m;
+    # Rate limiting (ajustado: uploads permitem picos mais altos)
+    limit_req_zone $binary_remote_addr zone=upload:10m rate=3r/s;
     limit_req_zone $binary_remote_addr zone=api:10m rate=30r/m;
 
     server {
@@ -144,9 +144,10 @@ http {
             proxy_read_timeout 60s;
         }
 
-        # Upload endpoint com rate limiting específico
+        # Upload endpoint com rate limiting específico (mais permissivo)
         location /api/upload {
-            limit_req zone=upload burst=2 nodelay;
+            # Permite até 3 requisições/segundo por IP, com burst de 15 e pequena fila (sem nodelay)
+            limit_req zone=upload burst=15;
             
             proxy_pass http://127.0.0.1:8002/upload;
             proxy_set_header Host $host;
