@@ -252,6 +252,7 @@
       function setSendStatus(state,text){els.sendStatus.className='status-badge '+(state==='testing'?'status-testing':state==='ok'?'status-ok':state==='err'?'status-err':'status-neutral');els.sendStatus.textContent=text;}
       function setProgress(pct){els.sendBar.style.width=(Math.max(0,Math.min(100,pct)))+'%';}
       function log(msg){els.sendLog.textContent=(els.sendLog.textContent?els.sendLog.textContent+'\n':'')+msg;els.sendLog.scrollTop=els.sendLog.scrollHeight;}
+      function yieldToUI(){return new Promise((resolve)=>{if('requestIdleCallback' in window){requestIdleCallback(()=>resolve(),{timeout:50});}else{requestAnimationFrame(()=>resolve());}});}
 
       function renderThumbs(){els.thumbs.innerHTML='';processed.forEach(item=>{const div=document.createElement('div');div.className='thumb';div.innerHTML=`<img src="${item.dados_base64}" alt="${item.nome_processado}"><div class="meta">${item.nome_processado}<br>${item.dimensoes.processada.w}x${item.dimensoes.processada.h} • ${item.tamanho_kb} KB</div>`;els.thumbs.append(div);});els.procCount.textContent=processed.length+` imagem(ns) processadas`;els.sendBtn.disabled=!(processed.length && webhookCfg && webhookCfg.url);els.renameBtn.disabled=!processed.length;els.renameAutoBtn.disabled=!processed.length;}
 
@@ -261,24 +262,30 @@
         setSendStatus('testing','Processando imagens...');setProgress(5);log('Processamento iniciado');
         let idx=0;
         for(const file of files){
-          idx++; log(`Lendo arquivo ${idx}/${files.length}: ${file.name}`);
-          const id = uuidv4();
-          const dataUrl=await fileToProcessedDataURL(file,0.9);
-          const img=await dataURLToImage(dataUrl);
-          const originalInfo=await getOriginalInfo(file);
-          const bytes=dataUrlBytes(dataUrl);
-          const hash=await sha256HexFromDataUrl(dataUrl);
-          log(`Imagem ${idx}: hash=${hash.substring(0,16)}… tamanho=${bytes} bytes`);
-          const procDims = (els.yoloResize && els.yoloResize.checked) ? {w:640,h:640} : {w:img.naturalWidth,h:img.naturalHeight};
-          processed.push({
-            id,
-            nome_original:file.name,
-            nome_processado:(file.name.replace(/\.[^.]+$/, '')||'image')+'-processed.jpg',
-            dados_base64:dataUrl,
-            hash,
-            dimensoes:{original:originalInfo,processada:procDims},
-            tamanho_kb:Number((bytes/1024).toFixed(1))
-          });
+          await yieldToUI();
+          try{
+            idx++; log(`Lendo arquivo ${idx}/${files.length}: ${file.name}`);
+            const id = uuidv4();
+            const dataUrl=await fileToProcessedDataURL(file,0.9);
+            await yieldToUI();
+            const img=await dataURLToImage(dataUrl);
+            const originalInfo=await getOriginalInfo(file);
+            const bytes=dataUrlBytes(dataUrl);
+            const hash=await sha256HexFromDataUrl(dataUrl);
+            log(`Imagem ${idx}: hash=${hash.substring(0,16)}… tamanho=${bytes} bytes`);
+            const procDims = (els.yoloResize && els.yoloResize.checked) ? {w:640,h:640} : {w:img.naturalWidth,h:img.naturalHeight};
+            processed.push({
+              id,
+              nome_original:file.name,
+              nome_processado:(file.name.replace(/\.[^.]+$/, '')||'image')+'-processed.jpg',
+              dados_base64:dataUrl,
+              hash,
+              dimensoes:{original:originalInfo,processada:procDims},
+              tamanho_kb:Number((bytes/1024).toFixed(1))
+            });
+          }catch(e){
+            log(`Erro ao processar ${file.name}: ${e.message||e}`);
+          }
           setProgress(5 + Math.floor(90*idx/files.length));
         }
         // Verificar duplicatas após conversão
@@ -286,6 +293,11 @@
         const dupHashes=Object.entries(cnt).filter(([,n])=>n>1);
         if(dupHashes.length){
           log(`Aviso: ${dupHashes.length} hash(es) duplicados detectados (imagens idênticas após conversão).`);
+        }
+        if(processed.length===0){
+          setSendStatus('err','Nenhuma imagem processada');
+          log('Nenhuma imagem foi processada com sucesso. Verifique o formato dos arquivos (JPEG/PNG) e tente novamente.');
+          return;
         }
         setSendStatus('ok','Imagens processadas');log('Processamento concluído');renderThumbs();
       }
