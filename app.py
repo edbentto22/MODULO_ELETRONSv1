@@ -28,6 +28,9 @@ if not CORS_ORIGINS:
         # incluir 8002 para quando o backend roda nessa porta localmente
         "http://localhost:8002",
         "http://127.0.0.1:8002",
+        # incluir 8006 quando servir frontend local com http.server 8006
+        "http://localhost:8006",
+        "http://127.0.0.1:8006",
     ]
 
 DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w\-\.+/]+);base64,(?P<b64>.+)$")
