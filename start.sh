@@ -1,0 +1,237 @@
+#!/bin/bash
+set -e
+
+# Definir variáveis
+export ENVIRONMENT=${ENVIRONMENT:-production}
+export PYTHONUNBUFFERED=1
+export PYTHONDONTWRITEBYTECODE=1
+
+# Função de log
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Função de cleanup
+cleanup() {
+    log "Received signal, shutting down..."
+    if [ ! -z "$UVICORN_PID" ]; then
+        kill $UVICORN_PID 2>/dev/null || true
+        wait $UVICORN_PID 2>/dev/null || true
+    fi
+    if [ ! -z "$NGINX_PID" ]; then
+        kill $NGINX_PID 2>/dev/null || true
+    fi
+    exit 0
+}
+
+# Configurar trap para cleanup
+trap cleanup SIGTERM SIGINT
+
+log "Starting YOLO Image Preprocessor Service"
+log "Environment: $ENVIRONMENT"
+
+# Verificar diretórios necessários
+log "Checking directories..."
+mkdir -p /app/imagens
+mkdir -p /var/log/nginx
+mkdir -p /var/lib/nginx/body
+mkdir -p /var/lib/nginx/fastcgi
+mkdir -p /var/lib/nginx/proxy
+mkdir -p /var/lib/nginx/scgi
+mkdir -p /var/lib/nginx/uwsgi
+
+# Verificar permissões
+if [ ! -w "/app/imagens" ]; then
+    log "ERROR: /app/imagens is not writable"
+    exit 1
+fi
+
+# Configurar nginx
+log "Configuring nginx..."
+cat > /etc/nginx/nginx.conf << 'EOF'
+user www-data;
+worker_processes auto;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # Logging
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                   '$status $body_bytes_sent "$http_referer" '
+                   '"$http_user_agent" "$http_x_forwarded_for"';
+    
+    access_log /var/log/nginx/access.log main;
+    error_log /var/log/nginx/error.log warn;
+
+    # Performance
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 50M;
+
+    # Gzip
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 10240;
+    gzip_proxied expired no-cache no-store private must-revalidate max-age=0;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/x-javascript
+        application/xml+rss
+        application/javascript
+        application/json;
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=upload:10m rate=10r/m;
+    limit_req_zone $binary_remote_addr zone=api:10m rate=30r/m;
+
+    server {
+        listen 80 default_server;
+        server_name _;
+        
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+        # Frontend estático
+        location / {
+            root /var/www/html;
+            try_files $uri $uri/ /index.html;
+            
+            # Cache headers for static files
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+
+        # API endpoints
+        location /api/ {
+            limit_req zone=api burst=5 nodelay;
+            
+            proxy_pass http://127.0.0.1:8002/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;
+            
+            # Timeouts
+            proxy_connect_timeout 5s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+
+        # Upload endpoint com rate limiting específico
+        location /api/upload {
+            limit_req zone=upload burst=2 nodelay;
+            
+            proxy_pass http://127.0.0.1:8002/upload;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;
+            
+            # Timeout mais longo para uploads
+            proxy_connect_timeout 5s;
+            proxy_send_timeout 300s;
+            proxy_read_timeout 300s;
+            
+            client_max_body_size 50M;
+        }
+
+        # Servir imagens estáticas
+        location /imagens/ {
+            proxy_pass http://127.0.0.1:8002/imagens/;
+            proxy_set_header Host $host;
+            
+            # Cache headers para imagens
+            expires 1d;
+            add_header Cache-Control "public";
+        }
+
+        # Health check
+        location /health {
+            access_log off;
+            proxy_pass http://127.0.0.1:8002/health;
+        }
+    }
+}
+EOF
+
+# Testar configuração do nginx
+log "Testing nginx configuration..."
+nginx -t
+
+if [ $? -ne 0 ]; then
+    log "ERROR: nginx configuration is invalid"
+    exit 1
+fi
+
+# Iniciar nginx
+log "Starting nginx..."
+nginx -g "daemon off;" &
+NGINX_PID=$!
+
+# Aguardar nginx inicializar
+sleep 2
+
+# Verificar se nginx está rodando
+if ! kill -0 $NGINX_PID 2>/dev/null; then
+    log "ERROR: nginx failed to start"
+    exit 1
+fi
+
+log "Nginx started successfully (PID: $NGINX_PID)"
+
+# Iniciar FastAPI
+log "Starting FastAPI application..."
+if [ "$ENVIRONMENT" = "development" ]; then
+    uvicorn app:app --host 127.0.0.1 --port 8002 --reload --log-level debug &
+else
+    uvicorn app:app --host 127.0.0.1 --port 8002 --workers 2 --log-level info &
+fi
+
+UVICORN_PID=$!
+log "FastAPI started (PID: $UVICORN_PID)"
+
+# Aguardar FastAPI inicializar
+sleep 3
+
+# Health check
+log "Performing health check..."
+for i in {1..10}; do
+    if curl -f http://127.0.0.1:8002/health >/dev/null 2>&1; then
+        log "Health check passed"
+        break
+    fi
+    if [ $i -eq 10 ]; then
+        log "ERROR: Health check failed after 10 attempts"
+        exit 1
+    fi
+    log "Health check attempt $i failed, retrying..."
+    sleep 2
+done
+
+log "Service is ready and healthy"
+
+# Aguardar qualquer processo finalizar
+wait

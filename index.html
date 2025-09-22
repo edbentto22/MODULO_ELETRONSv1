@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YOLO v8 Image Preprocessor</title>
+  <style>
+    :root{--border:#e2e8f0;--bg:#0b1220;--card:#0f172a;--text:#e2e8f0;--muted:#94a3b8;--green:#10b981;--amber:#f59e0b;--red:#ef4444;--blue:#3b82f6}
+    *{box-sizing:border-box}html,body{height:100%}body{margin:0;background:#0b1220;color:#e2e8f0;font:15px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .container{max-width:1200px;margin:0 auto;padding:24px}
+    .panel{background:var(--card);border:1px solid #1f2937;border-radius:10px;box-shadow:0 8px 24px rgba(2,6,23,.18)}
+
+    /* Floating toggle */
+    .settings-toggle{position:fixed;left:20px;bottom:20px;z-index:60;width:46px;height:46px;border-radius:999px;border:1px solid #334155;background:#111827;color:#e5e7eb;box-shadow:0 10px 30px rgba(0,0,0,.35);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+    .settings-toggle:hover{background:#0f172a}
+
+    /* Sidebar */
+    .settings-sidebar{position:fixed;top:0;left:-360px;width:340px;height:100%;background:#0b1220;color:#e2e8f0;border-right:1px solid #1f2937;box-shadow:0 10px 30px rgba(0,0,0,.35);transition:left .25s ease;z-index:55;display:grid;grid-template-rows:auto 1fr}
+    .settings-sidebar.open{left:0}
+    .settings-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #1f2937}
+    .settings-title{font-weight:700}
+    .settings-close{background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:8px;padding:6px 10px;cursor:pointer}
+    .settings-close:hover{background:#0f172a}
+    .settings-body{padding:12px 14px;overflow:auto;display:grid;gap:12px}
+    .settings .field{display:grid;gap:6px}
+
+    .input-group{display:flex;align-items:center;border:1px solid #334155;border-radius:8px;background:#0f172a}
+    .input-group .icon{width:36px;display:inline-flex;align-items:center;justify-content:center;color:#94a3b8}
+    .input-group input{flex:1;background:transparent;color:#e2e8f0;border:0;outline:0;padding:10px 10px}
+
+    .btn{background:var(--blue);color:#fff;border:0;border-radius:8px;padding:10px 12px;font-weight:600;cursor:pointer}
+    .btn:hover{background:#2563eb}
+    .btn.secondary{background:#111827;border:1px solid #374151}
+    .btn.danger{background:#ef4444}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+
+    .status-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-size:.78rem;font-weight:700}
+    .status-neutral{background:#334155;color:#e5e7eb}
+    .status-testing{background:var(--amber);color:#0b1220}
+    .status-ok{background:var(--green);color:#fff}
+    .status-err{background:var(--red);color:#fff}
+
+    .history-list{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+    .history-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#0f172a;border:1px solid #1f2937;border-radius:8px;padding:8px}
+    .history-list li button{background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:6px;padding:4px 8px;cursor:pointer}
+    .history-list li button:hover{background:#0b1220}
+
+    /* Main app */
+    main{min-height:60vh}
+    .placeholder{opacity:.7;color:#94a3b8}
+
+    .grid{display:grid;gap:16px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    @media(max-width:900px){.grid.cols-2{grid-template-columns:1fr}}
+
+    .section{padding:18px}
+    .section h3{margin:0 0 8px}
+
+    .uploader{display:grid;gap:10px}
+    .uploader .drop{border:1px dashed #334155;border-radius:10px;padding:14px;background:#0f172a;color:#94a3b8;text-align:center}
+    .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+    .thumb{border:1px solid #1f2937;border-radius:8px;overflow:hidden;background:#0b1220}
+    .thumb img{display:block;width:100%;height:100px;object-fit:cover}
+    .thumb .meta{padding:6px 8px;font-size:.8rem;color:#cbd5e1}
+
+    .field-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    @media(max-width:900px){.field-row{grid-template-columns:1fr}}
+
+    .log{background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:10px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;max-height:220px;overflow:auto}
+
+    .progress{height:8px;background:#0b1220;border:1px solid #1f2937;border-radius:8px;overflow:hidden}
+    .progress>span{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#06b6d4);width:0%}
+
+    /* Modal */
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:70}
+    .modal.open{display:flex}
+    .backdrop{position:absolute;inset:0;background:rgba(2,6,23,.7)}
+    .dialog{position:relative;background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:16px;max-width:520px;width:92%}
+    .dialog h4{margin:0 0 8px}
+    .dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+
+    /* Send history */
+    .send-history{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+    .send-history li{display:flex;justify-content:space-between;gap:8px;background:#0f172a;border:1px solid #1f2937;border-radius:8px;padding:8px}
+    .mini{opacity:.8;font-size:.85rem}
+  </style>
+</head>
+<body>
+  <main class="container">
+    <div class="panel section">
+      <h2 style="margin:0 0 6px">Pré-processamento YOLO + Envio</h2>
+      <p class="placeholder" id="webhookHint">Configure o webhook na engrenagem (canto inferior esquerdo) antes de enviar.</p>
+
+      <div class="grid cols-2">
+        <section class="uploader">
+          <h3>Imagens</h3>
+          <div class="drop">
+            <input id="fileInput" type="file" accept="image/*" multiple />
+            <div style="margin-top:6px">Selecione uma ou mais imagens. Elas serão convertidas para JPEG (qualidade 0.9).</div>
+            <label class="mini" style="display:flex;gap:6px;align-items:center;margin-top:8px"><input id="yoloResize" type="checkbox" checked> Redimensionar para 640 x 640 (padrão YOLO, letterbox)</label>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="processBtn" class="btn">Processar imagens</button>
+            <button id="renameBtn" class="btn secondary" disabled>Renomear (imagem1..)</button>
+            <button id="renameAutoBtn" class="btn secondary" disabled title="Usa o registro informado e sequência iniciando em 1">Auto renomear ({registro}-{sequencial}.jpg)</button>
+            <span id="procCount" class="mini">0 imagens processadas</span>
+          </div>
+          <div id="thumbs" class="thumbs"></div>
+        </section>
+
+        <section>
+          <h3>Metadados</h3>
+          <div class="field-row">
+            <div class="field">
+              <label for="metaRegistro">Registro (número)</label>
+              <div class="input-group"><span class="icon">#</span><input id="metaRegistro" type="number" min="0" step="1" placeholder="123"/></div>
+            </div>
+            <div class="field">
+              <label for="metaPonto">Ponto (número)</label>
+              <div class="input-group"><span class="icon">#</span><input id="metaPonto" type="number" min="0" step="1" placeholder="1"/></div>
+            </div>
+            <div class="field">
+              <label for="metaPlanilha">ID Planilha (string)</label>
+              <div class="input-group"><span class="icon">📂</span><input id="metaPlanilha" type="text" placeholder="planilha-xyz"/></div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;display:grid;gap:8px">
+            <button id="sendBtn" class="btn" disabled>Enviar para n8n</button>
+            <div id="sendStatus" class="status-badge status-neutral">Aguardando</div>
+            <div class="progress"><span id="sendProgressBar"></span></div>
+            <div class="mini">Destino: <span id="destUrl" style="word-break:break-all;opacity:.9">—</span></div>
+            <div class="log" id="sendLog">Log vazio</div>
+          </div>
+        </section>
+      </div>
+
+      <section style="margin-top:16px">
+        <h3>Histórico de envios</h3>
+        <ul id="sendHistory" class="send-history"></ul>
+      </section>
+    </div>
+  </main>
+
+  <!-- Floating toggle button -->
+  <button id="settingsToggle" class="settings-toggle" title="Configurações">⚙️</button>
+
+  <!-- Settings Sidebar -->
+  <aside id="settingsSidebar" class="settings-sidebar settings" aria-hidden="true">
+    <div class="settings-header">
+      <div class="settings-title">Configurações</div>
+      <button id="settingsClose" class="settings-close" aria-label="Fechar">Fechar</button>
+    </div>
+    <div class="settings-body">
+      <section>
+        <h4 style="margin:4px 0 8px">Webhook n8n</h4>
+        <div class="field">
+          <label for="webhookUrl">URL do Webhook (HTTPS)</label>
+          <div class="input-group"><span class="icon">🔗</span><input id="webhookUrl" name="webhookUrl" placeholder="https://seu-n8n.com/webhook/..." inputmode="url" autocomplete="url" /></div>
+          <small class="hint">Ex: https://n8n.seudominio.com/webhook/abc123</small>
+        </div>
+        <div class="field" style="grid-template-columns:1fr auto;align-items:end">
+          <div>
+            <label for="webhookTimeout">Timeout (ms)</label>
+            <div class="input-group"><span class="icon">⏱️</span><input id="webhookTimeout" type="number" min="1000" step="500" value="5000"/></div>
+          </div>
+          <div style="display:grid;gap:6px;justify-items:end">
+            <span id="webhookStatus" class="status-badge status-neutral">Não configurado</span>
+            <button id="testWebhook" class="btn">Testar Conexão</button>
+          </div>
+        </div>
+      </section>
+      <section>
+        <h4 style="margin:4px 0 8px">Links de Imagem (opcional)</h4>
+        <label style="display:flex;align-items:center;gap:8px">
+          <input id="useUploadLinks" type="checkbox" />
+          Gerar link público por imagem (upload antes do envio)
+        </label>
+        <div class="field">
+          <label for="uploadEndpoint">Endpoint de Upload (HTTPS)</label>
+          <div class="input-group"><span class="icon">🗄️</span><input id="uploadEndpoint" placeholder="https://seu-n8n.com/webhook/upload" inputmode="url" autocomplete="url"/></div>
+          <small class="hint">Endpoint deve responder JSON com campo url/link da imagem.</small>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <input id="onlyLinks" type="checkbox" />
+          Enviar somente os links (sem base64)
+        </label>
+      </section>
+      <section>
+        <h5>Histórico</h5>
+        <ul id="webhookHistory" class="history-list"></ul>
+      </section>
+    </div>
+  </aside>
+
+  <!-- Modal de confirmação -->
+  <div id="confirmModal" class="modal" aria-hidden="true" role="dialog" aria-modal="true">
+    <div class="backdrop" data-close="modal"></div>
+    <div class="dialog">
+      <h4>Confirmar envio</h4>
+      <div id="confirmText" class="mini">Deseja enviar 0 imagem(ns) para o webhook?</div>
+      <div class="actions">
+        <button id="cancelSend" class="btn secondary">Cancelar</button>
+        <button id="confirmSend" class="btn">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Sidebar de Configurações
+    (function(){
+      // Atualizar URLs das chamadas da API para usar /api/
+      const BASE_API_URL = (location.protocol.startsWith('http') && (location.port === '8000' || location.hostname === 'localhost')) ? 'http://127.0.0.1:8002' : '/api';
+      
+      const els={toggle:document.getElementById('settingsToggle'),sidebar:document.getElementById('settingsSidebar'),close:document.getElementById('settingsClose'),url:document.getElementById('webhookUrl'),timeout:document.getElementById('webhookTimeout'),status:document.getElementById('webhookStatus'),test:document.getElementById('testWebhook'),history:document.getElementById('webhookHistory'),uploadEndpoint:document.getElementById('uploadEndpoint'),useUploadLinks:document.getElementById('useUploadLinks'),onlyLinks:document.getElementById('onlyLinks')};
+      const LS_KEY_CFG='webhook_config_v1';const LS_KEY_HIST='webhook_history_v1';
+      
+      function isHttpsUrl(u){try{const x=new URL(u);return x.protocol==='https:';}catch{return false;}}
+      function setStatus(state,text){els.status.className='status-badge '+(state==='testing'?'status-testing':state==='ok'?'status-ok':state==='err'?'status-err':'status-neutral');els.status.textContent=text;}
+      function renderHistory(list){els.history.innerHTML='';if(!list.length){els.history.innerHTML='<li><span style="opacity:.7">Sem histórico</span></li>';return;}list.slice(0,5).forEach(u=>{const li=document.createElement('li');const span=document.createElement('span');span.textContent=u;span.style.wordBreak='break-all';const box=document.createElement('div');box.style.display='inline-flex';box.style.gap='6px';const apl=document.createElement('button');apl.textContent='Aplicar';apl.addEventListener('click',()=>{els.url.value=u;setStatus('neutral','URL aplicada (não testada)');document.dispatchEvent(new CustomEvent('webhook:updated',{detail:{url:u,timeout:Number(els.timeout.value)||5000}}));});const del=document.createElement('button');del.textContent='Remover';del.addEventListener('click',()=>{removeFromHistory(u);});box.append(apl,del);li.append(span,box);els.history.append(li);});}
+      function removeFromHistory(u){const hist=JSON.parse(localStorage.getItem(LS_KEY_HIST)||'[]');const next=hist.filter(x=>x!==u);localStorage.setItem(LS_KEY_HIST,JSON.stringify(next));renderHistory(next);}function load(){const cfg=JSON.parse(localStorage.getItem(LS_KEY_CFG)||'{}');const hist=JSON.parse(localStorage.getItem(LS_KEY_HIST)||'[]');if(cfg.url)els.url.value=cfg.url;if(cfg.timeout)els.timeout.value=cfg.timeout;if(cfg.uploadEndpoint)els.uploadEndpoint.value=cfg.uploadEndpoint;els.useUploadLinks.checked=!!cfg.useUploadLinks;els.onlyLinks.checked=!!cfg.onlyLinks;renderHistory(hist);if(cfg.url){setStatus('neutral','Configurado (não testado)');}else{setStatus('neutral','Não configurado');}}function save(url,timeout){const cfg={url,timeout:Number(timeout)||5000,uploadEndpoint:(els.uploadEndpoint?.value||'').trim(),useUploadLinks:!!els.useUploadLinks?.checked,onlyLinks:!!els.onlyLinks?.checked};localStorage.setItem(LS_KEY_CFG,JSON.stringify(cfg));const hist=JSON.parse(localStorage.getItem(LS_KEY_HIST)||'[]');const clean = hist.filter(h=>h!==url);clean.unshift(url);const limited=clean.slice(0,10);localStorage.setItem(LS_KEY_HIST,JSON.stringify(limited));renderHistory(limited);document.dispatchEvent(new CustomEvent('webhook:updated',{detail:cfg}));}async function testConnection(){const url=els.url.value.trim();const tmo=Number(els.timeout.value)||5000;if(!isHttpsUrl(url)){setStatus('err','URL inválida: use HTTPS');return;}setStatus('testing','Testando...');const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),tmo);try{await fetch(url,{method:'HEAD',mode:'no-cors',signal:ctrl.signal});clearTimeout(timer);setStatus('ok','Conectado');save(url,tmo);}catch(e){clearTimeout(timer);try{const ctrl2=new AbortController();const timer2=setTimeout(()=>ctrl2.abort(),tmo);const res2=await fetch(url,{method:'OPTIONS',signal:ctrl2.signal});clearTimeout(timer2);if(res2.ok){setStatus('ok','Conectado');save(url,tmo);}else{setStatus('err',`Erro ${res2.status||''}`.trim());}}catch(_){setStatus('err','Erro de conexão');}}}els.toggle.addEventListener('click',()=>{els.sidebar.classList.add('open');els.sidebar.setAttribute('aria-hidden','false');});els.close.addEventListener('click',()=>{els.sidebar.classList.remove('open');els.sidebar.setAttribute('aria-hidden','true');});els.test.addEventListener('click',testConnection);els.uploadEndpoint.addEventListener('change',()=>{save(els.url.value.trim(),els.timeout.value)});els.useUploadLinks.addEventListener('change',()=>{save(els.url.value.trim(),els.timeout.value)});els.onlyLinks.addEventListener('change',()=>{save(els.url.value.trim(),els.timeout.value)});els.url.addEventListener('change',()=>{const v=els.url.value.trim();if(!v){setStatus('neutral','Não configurado');return;}try{new URL(v);if(v.startsWith('https://'))setStatus('neutral','Configurando');else setStatus('err','URL inválida: use HTTPS');}catch{setStatus('err','URL inválida');}});els.url.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();testConnection();}});load();window.__WEBHOOK_CFG_KEYS__={LS_KEY_CFG}; // expor chave para outro módulo
+    })();
+  </script>
+
+  <script>
+    // Envio para n8n: geração de JSON, modal, progresso, retry e histórico
+    (function(){
+      const BASE_API_URL = (location.protocol.startsWith('http') && (location.port === '8000' || location.hostname === 'localhost')) ? 'http://127.0.0.1:8002' : '/api';
+      const qs=(sel)=>document.querySelector(sel);
+      const els={
+        fileInput:qs('#fileInput'),processBtn:qs('#processBtn'),renameBtn:qs('#renameBtn'),renameAutoBtn:qs('#renameAutoBtn'),thumbs:qs('#thumbs'),procCount:qs('#procCount'),
+        registro:qs('#metaRegistro'),ponto:qs('#metaPonto'),planilha:qs('#metaPlanilha'),
+        sendBtn:qs('#sendBtn'),sendStatus:qs('#sendStatus'),sendBar:qs('#sendProgressBar'),sendLog:qs('#sendLog'),destUrl:qs('#destUrl'),
+        modal:qs('#confirmModal'),confirmText:qs('#confirmText'),confirmBtn:qs('#confirmSend'),cancelBtn:qs('#cancelSend'),
+        sendHistory:qs('#sendHistory'),webhookHint:qs('#webhookHint'),yoloResize:qs('#yoloResize')
+      };
+      const LS_SEND_HIST='send_history_v1';
+      let processed=[]; // {id,nome_original,nome_processado,dados_base64,dimensoes:{original:{w,h},processada:{w,h}},tamanho_kb}
+      let webhookCfg=null;
+
+      function uuidv4(){return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));}
+      function dataUrlBytes(dataUrl){const b64=(dataUrl.split(',')[1]||'');return Math.floor((b64.length*3)/4 - (b64.endsWith('==')?2:b64.endsWith('=')?1:0));}
+      async function sha256HexFromDataUrl(dataUrl){
+        const b64=(dataUrl.split(',')[1]||'');
+        const binStr=atob(b64);
+        const len=binStr.length; const bytes=new Uint8Array(len);
+        for(let i=0;i<len;i++){ bytes[i]=binStr.charCodeAt(i); }
+        const digest=await crypto.subtle.digest('SHA-256',bytes);
+        const hex=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+        return hex;
+      }
+      function setSendStatus(state,text){els.sendStatus.className='status-badge '+(state==='testing'?'status-testing':state==='ok'?'status-ok':state==='err'?'status-err':'status-neutral');els.sendStatus.textContent=text;}
+      function setProgress(pct){els.sendBar.style.width=(Math.max(0,Math.min(100,pct)))+'%';}
+      function log(msg){els.sendLog.textContent=(els.sendLog.textContent?els.sendLog.textContent+'\n':'')+msg;els.sendLog.scrollTop=els.sendLog.scrollHeight;}
+
+      function renderThumbs(){els.thumbs.innerHTML='';processed.forEach(item=>{const div=document.createElement('div');div.className='thumb';div.innerHTML=`<img src="${item.dados_base64}" alt="${item.nome_processado}"><div class="meta">${item.nome_processado}<br>${item.dimensoes.processada.w}x${item.dimensoes.processada.h} • ${item.tamanho_kb} KB</div>`;els.thumbs.append(div);});els.procCount.textContent=processed.length+` imagem(ns) processadas`;els.sendBtn.disabled=!(processed.length && webhookCfg && webhookCfg.url);els.renameBtn.disabled=!processed.length;els.renameAutoBtn.disabled=!processed.length;}
+
+      async function processFiles(files){
+        processed=[];renderThumbs();
+        if(!files||!files.length){setSendStatus('neutral','Nenhuma imagem');return;}
+        setSendStatus('testing','Processando imagens...');setProgress(5);log('Processamento iniciado');
+        let idx=0;
+        for(const file of files){
+          idx++; log(`Lendo arquivo ${idx}/${files.length}: ${file.name}`);
+          const id = uuidv4();
+          const dataUrl=await fileToProcessedDataURL(file,0.9);
+          const img=await dataURLToImage(dataUrl);
+          const originalInfo=await getOriginalInfo(file);
+          const bytes=dataUrlBytes(dataUrl);
+          const hash=await sha256HexFromDataUrl(dataUrl);
+          log(`Imagem ${idx}: hash=${hash.substring(0,16)}… tamanho=${bytes} bytes`);
+          const procDims = (els.yoloResize && els.yoloResize.checked) ? {w:640,h:640} : {w:img.naturalWidth,h:img.naturalHeight};
+          processed.push({
+            id,
+            nome_original:file.name,
+            nome_processado:(file.name.replace(/\.[^.]+$/, '')||'image')+'-processed.jpg',
+            dados_base64:dataUrl,
+            hash,
+            dimensoes:{original:originalInfo,processada:procDims},
+            tamanho_kb:Number((bytes/1024).toFixed(1))
+          });
+          setProgress(5 + Math.floor(90*idx/files.length));
+        }
+        // Verificar duplicatas após conversão
+        const cnt={}; for(const p of processed){ cnt[p.hash]=(cnt[p.hash]||0)+1; }
+        const dupHashes=Object.entries(cnt).filter(([,n])=>n>1);
+        if(dupHashes.length){
+          log(`Aviso: ${dupHashes.length} hash(es) duplicados detectados (imagens idênticas após conversão).`);
+        }
+        setSendStatus('ok','Imagens processadas');log('Processamento concluído');renderThumbs();
+      }
+
+      function dataURLToImage(url){
+        return new Promise((resolve,reject)=>{
+          const img=new Image();
+          img.onload=()=>{
+            const w=img.naturalWidth, h=img.naturalHeight; img.src='';
+            const ver=new Image();
+            ver.onload=()=>resolve({naturalWidth:w,naturalHeight:h});
+            ver.onerror=()=>reject(new Error('Falha ao carregar verificação'));
+            ver.src=url;
+          };
+          img.onerror=()=>reject(new Error('Falha ao carregar'));
+          img.src=url;
+        });
+      }
+      
+      async function fileToProcessedDataURL(file,quality){
+        const doResize = !!(els.yoloResize && els.yoloResize.checked);
+        const targetW = 640, targetH = 640;
+        if('createImageBitmap' in window){
+          const bitmap = await createImageBitmap(file);
+          try{
+            const canvas=document.createElement('canvas');
+            if(doResize){
+              canvas.width=targetW; canvas.height=targetH;
+              const ctx=canvas.getContext('2d');
+              ctx.fillStyle='#000';
+              ctx.fillRect(0,0,targetW,targetH);
+              const scale=Math.min(targetW/bitmap.width, targetH/bitmap.height);
+              const newW=Math.round(bitmap.width*scale);
+              const newH=Math.round(bitmap.height*scale);
+              const dx=Math.floor((targetW-newW)/2);
+              const dy=Math.floor((targetH-newH)/2);
+              ctx.drawImage(bitmap, dx, dy, newW, newH);
+            }else{
+              canvas.width=bitmap.width; canvas.height=bitmap.height;
+              const ctx=canvas.getContext('2d');
+              ctx.drawImage(bitmap,0,0);
+            }
+            const url=canvas.toDataURL('image/jpeg',quality);
+            return url;
+          } finally {
+            try{bitmap.close&&bitmap.close();}catch(_){}
+          }
+        }
+        return new Promise((resolve,reject)=>{
+          const fr=new FileReader();
+          fr.onerror=()=>reject(new Error('Falha ao ler arquivo'));
+          fr.onload=()=>{
+            try{
+              const img=new Image();
+              img.onload=()=>{
+                try{
+                  const canvas=document.createElement('canvas');
+                  if(doResize){
+                    canvas.width=targetW; canvas.height=targetH;
+                    const ctx=canvas.getContext('2d');
+                    ctx.fillStyle='#000';
+                    ctx.fillRect(0,0,targetW,targetH);
+                    const scale=Math.min(targetW/img.naturalWidth, targetH/img.naturalHeight);
+                    const newW=Math.round(img.naturalWidth*scale);
+                    const newH=Math.round(img.naturalHeight*scale);
+                    const dx=Math.floor((targetW-newW)/2);
+                    const dy=Math.floor((targetH-newH)/2);
+                    ctx.drawImage(img, dx, dy, newW, newH);
+                  }else{
+                    canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+                    const ctx=canvas.getContext('2d');
+                    ctx.drawImage(img,0,0);
+                  }
+                  const url=canvas.toDataURL('image/jpeg',quality);
+                  resolve(url);
+                }catch(e){reject(e);}
+              };
+              img.onerror=()=>reject(new Error('Imagem inválida'));
+              img.src=fr.result;
+            }catch(e){reject(e);}
+          };
+          fr.readAsDataURL(file);
+        });
+      }
+      
+      function getOriginalInfo(file){return new Promise((resolve)=>{const fr=new FileReader();fr.onload=()=>{const img=new Image();img.onload=()=>resolve({w:img.naturalWidth,h:img.naturalHeight});img.src=fr.result;};fr.readAsDataURL(file);});}
+
+      function buildPayload(linksById){
+        const registro=parseInt(els.registro.value,10);const ponto=parseInt(els.ponto.value,10);const id_planilha=String(els.planilha.value||'').trim();
+        const timestamp=new Date().toISOString();
+        const onlyLinksCfg = !!(webhookCfg && webhookCfg.onlyLinks);
+        const linksMode = (linksById && Object.keys(linksById).length>0) || onlyLinksCfg;
+        const imagens=processed.map(p=>{
+          const base={id:p.id,nome_original:p.nome_original,nome_processado:p.nome_processado,dimensoes:{original:p.dimensoes.original,processada:p.dimensoes.processada},tamanho_kb:p.tamanho_kb};
+          if(linksMode){
+            const link = linksById && linksById[p.id];
+            if(!link) throw new Error(`Faltou gerar link para a imagem ${p.nome_processado}`);
+            return {...base, link};
+          }else{
+            const maybeLink = linksById && linksById[p.id] ? {link:linksById[p.id]} : {};
+            return {...base, dados_base64:p.dados_base64, ...maybeLink};
+          }
+        });
+        const payload={registro,ponto,id_planilha,timestamp,imagens,onlyLinks: linksMode};
+        const ok=validatePayload(payload);
+        if(!ok.ok){throw new Error('Validação falhou: '+ok.msg);}return payload;
+      }
+
+      function validatePayload(p){
+        if(!Number.isFinite(p.registro)) return {ok:false,msg:'registro deve ser número'};
+        if(!Number.isFinite(p.ponto)) return {ok:false,msg:'ponto deve ser número'};
+        if(typeof p.id_planilha!=="string"||!p.id_planilha) return {ok:false,msg:'id_planilha obrigatório'};
+        if(!Array.isArray(p.imagens)||p.imagens.length===0) return {ok:false,msg:'mínimo 1 imagem'};
+        const onlyLinks = !!p.onlyLinks;
+        for(const it of p.imagens){
+          if(!it.id) return {ok:false,msg:'imagem sem id'};
+          if(!it.dimensoes||!it.dimensoes.original||!it.dimensoes.processada) return {ok:false,msg:'dimensoes ausentes'};
+          if(typeof it.tamanho_kb!=="number") return {ok:false,msg:'tamanho_kb inválido'};
+          if(onlyLinks){
+            try{
+              const u=new URL(it.link);
+              const isLocal=(u.hostname==='localhost'||u.hostname==='127.0.0.1');
+              const okProto=(u.protocol==='https:'||(isLocal&&u.protocol==='http:'));
+              if(!okProto) return {ok:false,msg:'link deve ser HTTPS (ou http local)'};
+            }catch{return {ok:false,msg:'link inválido'}}
+          }else{
+            if(!/^data:image\/(jpeg|jpg|png);base64,/.test(it.dados_base64||'')) return {ok:false,msg:'dados_base64 inválido'};
+          }
+        }
+        return {ok:true};
+      }
+
+      function openModal(count){els.confirmText.textContent=`Deseja enviar ${count} imagem(ns) para o webhook?`;els.modal.classList.add('open');els.modal.setAttribute('aria-hidden','false');}
+      function closeModal(){els.modal.classList.remove('open');els.modal.setAttribute('aria-hidden','true');}
+
+      async function sendWithRetry(url,timeoutMs,body,maxAttempts=3){
+        let lastErr=null;for(let attempt=1;attempt<=maxAttempts;attempt++){
+          setSendStatus('testing',`Enviando (tentativa ${attempt}/${maxAttempts})`);
+          log(`POST ${url} [tentativa ${attempt}]`);
+          setProgress(90+Math.floor(10*attempt/maxAttempts));
+          const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),timeoutMs);
+          try{
+            const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},mode:'cors',body:JSON.stringify(body),signal:ctrl.signal});
+            clearTimeout(t);
+            const text=await res.text();
+            log(`Status: ${res.status} ${res.statusText}`);
+            if(text) log(`Resposta: ${text.substring(0,1000)}`);
+            if(res.ok) return {ok:true,status:res.status,body:text};
+            lastErr=new Error(`HTTP ${res.status}`);
+          }catch(e){clearTimeout(t);lastErr=e;log(`Erro: ${e.message||e}`);}        }
+        return {ok:false,error:lastErr};
+      }
+
+      // Função de upload para obter link público (usada quando useUploadLinks=true)
+      async function uploadImageAndGetLink(endpoint,timeoutMs,dataUrl,filename){
+        const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),timeoutMs);
+        try{
+          const reg=parseInt(els.registro.value,10); const pt=parseInt(els.ponto.value,10); const body={filename, data_url:dataUrl, registro: Number.isFinite(reg)?reg:undefined, ponto: Number.isFinite(pt)?pt:undefined};
+          const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),mode:'cors',signal:ctrl.signal});
+          clearTimeout(t);
+          if(!res.ok){throw new Error(`HTTP ${res.status}`);}            
+          const json=await res.json().catch(()=>null);
+          const link=json?.link||json?.url||json?.Location||json?.data?.url||json?.data?.link;
+          if(typeof link!=="string"){
+            throw new Error('Resposta sem URL válida');
+          }
+          try{
+            const u=new URL(link);
+            const isLocal=(u.hostname==='localhost'||u.hostname==='127.0.0.1');
+            const okProto=(u.protocol==='https:'||(isLocal&&u.protocol==='http:'));
+            if(!okProto) throw new Error('Resposta sem URL válida');
+          }catch{ throw new Error('Resposta sem URL válida'); }
+          log(`Link obtido: ${link}`);
+          return link;
+        }catch(e){clearTimeout(t); throw e;}
+      }
+
+      function saveSendHistory(entry){const list=JSON.parse(localStorage.getItem(LS_SEND_HIST)||'[]');list.unshift(entry);localStorage.setItem(LS_SEND_HIST,JSON.stringify(list.slice(0,20)));renderSendHistory();}
+      function renderSendHistory(){const list=JSON.parse(localStorage.getItem(LS_SEND_HIST)||'[]');els.sendHistory.innerHTML='';if(!list.length){els.sendHistory.innerHTML='<li><span class="mini">Sem envios</span></li>';return;}list.slice(0,8).forEach(it=>{const li=document.createElement('li');const left=document.createElement('div');left.style.wordBreak='break-all';left.innerHTML=`<strong>${new Date(it.time).toLocaleString()}</strong><br><span class="mini">${it.url}</span>`;const badge=document.createElement('span');badge.className='status-badge '+(it.ok?'status-ok':'status-err');badge.textContent=it.ok?`OK ${it.status}`:'Erro';li.append(left,badge);els.sendHistory.append(li);});}
+
+      // Eventos
+      els.processBtn.addEventListener('click',()=>{const files=els.fileInput.files;if(!files||!files.length){setSendStatus('err','Selecione arquivos');return;}processFiles([...files]);});
+      els.renameBtn.addEventListener('click',()=>{if(!processed.length) return;processed=processed.map((p,i)=>({...p,nome_processado:`imagem${i+1}.jpg`}));renderThumbs();});
+      els.renameAutoBtn.addEventListener('click',()=>{if(!processed.length) return; const registro=parseInt(els.registro.value,10); if(!Number.isFinite(registro) || registro<0){ alert('Informe um registro válido (número inteiro) antes de auto renomear.'); return;} processed=processed.map((p,i)=>({...p,nome_processado:`${registro}-${i+1}.jpg`})); renderThumbs();});
+      els.sendBtn.addEventListener('click',()=>{openModal(processed.length);});
+      els.cancelBtn.addEventListener('click',()=>closeModal());
+      els.modal.addEventListener('click',(e)=>{if(e.target.dataset.close==='modal') closeModal();});
+      els.confirmBtn.addEventListener('click',async()=>{
+        closeModal();
+        let linksById=null;
+        if(webhookCfg?.onlyLinks && !webhookCfg?.useUploadLinks){ setSendStatus('err','Ative "Gerar link público por imagem" para enviar somente links'); return; }
+        if(webhookCfg?.useUploadLinks){
+          const endpoint=webhookCfg.uploadEndpoint; const tmo=Number(webhookCfg.timeout)||5000;
+          try{
+            const u=new URL(endpoint);
+            const isLocal=(u.hostname==='localhost'||u.hostname==='127.0.0.1');
+            const okProto=(u.protocol==='https:'||(isLocal&&u.protocol==='http:'));
+            if(!okProto){ setSendStatus('err','Endpoint deve ser HTTPS (ou HTTP em localhost)'); return; }
+          }catch{ setSendStatus('err','Endpoint de upload inválido'); return; }
+          els.sendBtn.disabled=true; setProgress(10); els.sendLog.textContent=''; setSendStatus('testing','Gerando links...');
+          linksById={}; let i=0;
+          for(const item of processed){ i++; log(`Upload ${i}/${processed.length}: ${item.nome_processado}`); try{ const link=await uploadImageAndGetLink(endpoint,tmo,item.dados_base64,item.nome_processado); linksById[item.id]=link; setProgress(10+Math.floor(60*i/processed.length)); }catch(e){ setSendStatus('err','Falha ao gerar link: '+(e.message||e)); els.sendBtn.disabled=false; return; } }
+          setSendStatus('testing','Links gerados');
+        }
+        let payload; try{ payload=buildPayload(linksById);}catch(e){ setSendStatus('err',e.message); return; }
+        if(!webhookCfg||!webhookCfg.url){setSendStatus('err','Webhook não configurado');return;}
+        els.sendBtn.disabled=true; if(!linksById){ setProgress(0); els.sendLog.textContent=''; setSendStatus('testing','Preparando envio...'); } else { setSendStatus('testing','Enviando payload...'); }
+        try{
+          const res=await sendWithRetry(webhookCfg.url,Number(webhookCfg.timeout)||5000,payload,3);
+          if(res.ok){setSendStatus('ok','Enviado com sucesso');setProgress(100);saveSendHistory({time:new Date().toISOString(),url:webhookCfg.url,ok:true,status:res.status,count:payload.imagens.length});}
+          else{setSendStatus('err','Falha no envio');saveSendHistory({time:new Date().toISOString(),url:webhookCfg.url,ok:false,error:String(res.error),count:payload.imagens.length});}
+        }finally{els.sendBtn.disabled=false;}
+      });
+
+      // Integrar com configurações de webhook
+      function loadWebhookCfg(){const key=window.__WEBHOOK_CFG_KEYS__?.LS_KEY_CFG||'webhook_config_v1';const cfg=JSON.parse(localStorage.getItem(key)||'{}');webhookCfg=(cfg&&cfg.url)?cfg:null;els.destUrl.textContent=webhookCfg?webhookCfg.url:'—';els.sendBtn.disabled=!(processed.length && webhookCfg && webhookCfg.url);if(webhookCfg){els.webhookHint.style.display='none';}else{els.webhookHint.style.display='block';}}
+      document.addEventListener('webhook:updated',e=>{webhookCfg=e.detail;els.destUrl.textContent=webhookCfg.url||'—';els.sendBtn.disabled=!(processed.length && webhookCfg && webhookCfg.url);});
+
+      // Init
+      loadWebhookCfg();renderSendHistory();
+    })();
+  </script>
+</body>
+</html>

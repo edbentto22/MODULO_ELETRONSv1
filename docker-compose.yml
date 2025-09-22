@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: modulo-yolo-app
+    ports:
+      - "80:80"
+    environment:
+      # URL base será inferida automaticamente via headers X-Forwarded-*
+      # - BASE_URL=https://preprocessor.matika.app
+      - CORS_ORIGINS=https://preprocessor.matika.app
+      - MAX_SIZE_MB=25
+    volumes:
+      # Volume para persistir uploads
+      - uploads:/app/imagens
+    # Remover user root por segurança - usando appuser no Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  uploads:
+    driver: local
